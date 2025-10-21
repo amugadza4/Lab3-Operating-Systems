@@ -1,0 +1,85 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+
+int main(int argc, char *argv[]) {
+    int pipe1[2]; // pipe between cat and grep
+    int pipe2[2]; // pipe between grep and sort
+    pid_t pid1, pid2;
+
+    // Ensure correct usage
+    if (argc != 2) {
+        fprintf(stderr, "Usage: %s <search_term>\n", argv[0]);
+        exit(1);
+    }
+
+    // Create first pipe
+    if (pipe(pipe1) == -1) {
+        perror("pipe1 failed");
+        exit(1);
+    }
+
+    // Fork first child (grep process)
+    pid1 = fork();
+    if (pid1 < 0) {
+        perror("fork1 failed");
+        exit(1);
+    }
+
+    if (pid1 == 0) {
+        // Child process (will run grep)
+        // Create second pipe (for grep -> sort)
+        if (pipe(pipe2) == -1) {
+            perror("pipe2 failed");
+            exit(1);
+        }
+
+        pid2 = fork();
+        if (pid2 < 0) {
+            perror("fork2 failed");
+            exit(1);
+        }
+
+        // ---------- Grandchild (sort) ----------
+        if (pid2 == 0) {
+            // Redirect stdin to read from pipe2[0]
+            dup2(pipe2[0], STDIN_FILENO);
+            close(pipe2[0]);
+            close(pipe2[1]);
+
+            // Execute sort
+            execlp("sort", "sort", NULL);
+            perror("execlp sort failed");
+            exit(1);
+        }
+
+        // ---------- Child (grep) ----------
+        // Redirect stdin to read from pipe1[0] (output of cat)
+        dup2(pipe1[0], STDIN_FILENO);
+        close(pipe1[0]);
+        close(pipe1[1]);
+
+        // Redirect stdout to write into pipe2[1] (input for sort)
+        dup2(pipe2[1], STDOUT_FILENO);
+        close(pipe2[0]);
+        close(pipe2[1]);
+
+        // Execute grep with argument
+        execlp("grep", "grep", argv[1], NULL);
+        perror("execlp grep failed");
+        exit(1);
+    }
+
+    // ---------- Parent (cat) ----------
+    // Redirect stdout to write into pipe1[1]
+    dup2(pipe1[1], STDOUT_FILENO);
+    close(pipe1[0]);
+    close(pipe1[1]);
+
+    // Execute cat scores
+    execlp("cat", "cat", "scores", NULL);
+    perror("execlp cat failed");
+    exit(1);
+}
+
